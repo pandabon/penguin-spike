@@ -2,11 +2,11 @@
 # Build the four probes and run each on Spike under two ISA strings:
 #   chip  the riscv,isa string from Penguin's devicetree (Spike accepts it as is)
 #   hand  a hand-written string that adds zvfbfwma, which Saturn does not have
-# Needs: clang + lld with RISC-V support (LLVM 18 or newer) and spike on PATH, or CLANG / SPIKE set.
+# Needs: a RISC-V GCC (default: the Zephyr SDK's riscv64-zephyr-elf-gcc) and spike, on PATH or as CC / SPIKE.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 out=${OUT:-$here/build}
-CLANG=${CLANG:-clang}
+CC=${CC:-riscv64-zephyr-elf-gcc}
 SPIKE=${SPIKE:-spike}
 mkdir -p "$out"
 
@@ -29,8 +29,7 @@ verdict() {
 printf '%-32s | %-22s | %-22s\n' "probe" "Spike, chip ISA" "Spike, hand ISA (+zvfbfwma)"
 for c in 1 2 3 4; do
   elf=$out/probe$c.elf
-  "$CLANG" --target=riscv64 -march=rv64gcv_zvfbfmin_zvfbfwma -nostdlib -fuse-ld=lld \
-    -Wl,-T,"$here/link.ld" -DCASE=$c -o "$elf" "$here/probe.S"
+  "$CC" -march=rv64gcv -mabi=lp64d -nostdlib -T "$here/link.ld" -DCASE=$c -o "$elf" "$here/probe.S"
   set +e
   timeout 10 "$SPIKE" --isa=$CHIP_ISA "$elf"; a=$?
   timeout 10 "$SPIKE" --isa=$HAND_ISA "$elf"; b=$?

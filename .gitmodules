@@ -12,3 +12,7 @@
 	url = https://github.com/pandabon/executorch.git
 	branch = penguin-1.6
 	shallow = true
+[submodule "riscv-isa-sim"]
+	path = riscv-isa-sim
+	url = https://github.com/riscv-software-src/riscv-isa-sim.git
+	shallow = true

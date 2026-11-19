@@ -1,5 +1,7 @@
 # One-instruction probes for Saturn's bf16 / fp8 vector support.
-# Build one ELF per case with -DCASE=<n> (see run.sh). Each ELF exits through HTIF:
+# Build one ELF per case with -DCASE=<n> (see run.sh). The bf16/fp8 instructions are given as raw words,
+# so any RISC-V assembler with plain V support builds them (encodings checked with llvm-objdump).
+# Each ELF exits through HTIF:
 #   0            the instruction ran (and, in cases 1, 3, 4, gave the expected value)
 #   10 + mcause  the instruction trapped (12 = illegal instruction)
 #   20           vsetvl refused the vtype (vill set)
@@ -37,14 +39,14 @@ _start:
   vsetvli t0, a1, e32, m2, ta, ma
   vmv.v.i v8, 0
   vsetvl t0, a1, t1
-  vfwmacc.vv v8, v1, v2              # 1.0 * 1.0 + 0 -> f32 1.0
+  .word 0xf2209457                   # vfwmacc.vv v8, v1, v2: 1.0 * 1.0 + 0 -> f32 1.0
   vsetvli t0, a1, e32, m2, ta, ma
   vmv.x.s t4, v8
   li t5, 0x3f800000
   bne t4, t5, wrong
 #elif CASE == 2
   vsetivli t0, 4, e16, m1, ta, ma
-  vfwmaccbf16.vv v8, v1, v2
+  .word 0xee209457                   # vfwmaccbf16.vv v8, v1, v2
 #elif CASE == 3
   li t1, VT_E8
   vsetvl t0, a1, t1
@@ -56,7 +58,7 @@ _start:
   vsetvli t0, a1, e16, m2, ta, ma
   vmv.v.i v8, 0
   vsetvl t0, a1, t1
-  vfwmacc.vv v8, v1, v2              # 1.0 * 1.0 + 0 -> bf16 1.0
+  .word 0xf2209457                   # vfwmacc.vv v8, v1, v2: 1.0 * 1.0 + 0 -> bf16 1.0
   vsetvli t0, a1, e16, m2, ta, ma
   vmv.x.s t4, v8
   li t5, 0x3f80
@@ -70,7 +72,7 @@ _start:
   bltz t2, vill
   li t3, 0x38                        # E4M3 1.0
   vmv.v.x v1, t3
-  vfwcvtbf16.f.f.v v8, v1            # -> bf16 1.0
+  .word 0x4a169457                   # vfwcvtbf16.f.f.v v8, v1: -> bf16 1.0
   vsetvli t0, a1, e16, m2, ta, ma
   vmv.x.s t4, v8
   li t5, 0x3f80

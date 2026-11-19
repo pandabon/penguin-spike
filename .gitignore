@@ -1,1 +1,8 @@
 build/
+.tools/
+.venv/
+# west workspace (scripts/setup.sh --model)
+.west/
+zephyr/
+zephyr-penguin/
+modules/
