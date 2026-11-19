@@ -13,7 +13,6 @@ whether it ran on Spike, on RTL simulation or on the chip.
 | [1. Matching Spike to the chip](#1-matching-spike-to-the-chip) | the chip's ISA string and memory map on Spike; a probe of Saturn's bf16/fp8 instructions | `probes/saturn-bf16-fp8/run.sh` |
 | [2. An upstream test suite, bare-metal on Spike](#2-an-upstream-test-suite-bare-metal-on-spike) | XNNPACK's own unit tests on Saturn RVV, without an OS | yes |
 | [3. A whole model on Spike, stage by stage](#3-a-whole-model-on-spike-stage-by-stage) | ExecuTorch on Zephyr: golden checks per stage and a per-operator profile | yes (needs the model weights from Hugging Face) |
-| [4. Modelling Atlas inside Spike](#4-modelling-atlas-inside-spike) | a Spike plugin for Atlas's host interface and scalar core | description only |
 
 ## Quick start
 
@@ -176,24 +175,6 @@ How we used it:
   instruction profile. It ranks work; it does not predict time.
 - **What the profile found.** On the first run, 61 % of the expert layer's `execute()` was a scalar 4x2 gemm: the two
   linears with n = 720 had no RVV kernel for that tile on RISC-V. Adding an RVV 7x2v kernel for that tile cut the whole action step from 9.33 G to 7.36 G instructions (-21 %), with identical output.
-
-## 4. Modelling Atlas inside Spike
-
-We have a prototype Spike plugin for Atlas. It models the host-visible windows (instruction memory at 0x2_0000, CSRs at
-0x4_0000, VMEM at 0x2000_0000) and Atlas's scalar core, so a driver and its host code run on Spike. It does not model
-DMA, the matrix or vector units, or numerics, so a real kernel stops at its first DMA. It is not public yet. The next step
-we have in mind is to use the Atlas team's [npu_model](https://github.com/ucb-ee194-tapeout/npu_model) as the engine
-behind the same windows, so one Spike run checks the host side and Atlas's results together.
-
-Things about Spike's plugin interface we learned the hard way (Spike 1.1.1-dev):
-- Build the plugin as a shared object and do **not** link `libriscv`. The `spike` binary already exports it; a second
-  copy registers devices into a separate map, and Spike then reports "Plugin not found".
-- Load it with `--extlib=lib.so --device=<name>,<args>`. Each device instance has one base address, so Atlas's three
-  windows take three `--device` instances that share one model object.
-- Plugin devices advance only in `tick()`, which Spike calls once every 5,000 instructions. Let the model also step on
-  host reads of its registers, or poll loops crawl.
-- Plugin devices never appear in Spike's generated devicetree; a static board devicetree is needed.
-- `parse()` receives the `sim_t*`, whose `addr_to_mem()` gives direct access to RAM, which is enough for a DMA model.
 
 ## Credits
 
