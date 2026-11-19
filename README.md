@@ -24,8 +24,12 @@ make probe                # section 1, seconds
 make xnnpack-test         # section 2, a few minutes to build, under a second to run
 ```
 
+Checked from a fresh clone on Linux x86-64 in a shell with only `/usr/bin` on its PATH: setup plus both commands
+take about 6 minutes and end with the probe table and `[  PASSED  ] 24 tests.`
+
 For section 3, run `scripts/setup.sh --model` once more (a Python venv with torch and the ExecuTorch fork, plus the
-board repo and Zephyr through west; several GB), then `make model`.
+board repo and Zephyr through west; several GB), then `make model`. That path (`--model`, `make model`) has not been run from a fresh clone yet; the commands it
+wraps were run in our own workspace.
 
 `scripts/setup.sh` installs nothing outside the repo: the Zephyr SDK and Spike go to `.tools/`, Python to `.venv/`,
 the west workspace into the repo folder itself. Re-running it skips what is already there; `make check` reports the
