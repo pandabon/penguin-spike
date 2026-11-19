@@ -12,7 +12,7 @@ whether it ran on Spike, on RTL simulation or on the chip.
 |---|---|---|
 | [1. Matching Spike to the chip](#1-matching-spike-to-the-chip) | the chip's ISA string and memory map on Spike; a probe of Saturn's bf16/fp8 instructions | `probes/saturn-bf16-fp8/run.sh` |
 | [2. An upstream test suite, bare-metal on Spike](#2-an-upstream-test-suite-bare-metal-on-spike) | XNNPACK's own unit tests on Saturn RVV, without an OS | yes |
-| [3. A whole model on Spike, stage by stage](#3-a-whole-model-on-spike-stage-by-stage) | ExecuTorch on Zephyr: golden checks per stage and a per-operator profile | needs the model files (see the section) |
+| [3. A whole model on Spike, stage by stage](#3-a-whole-model-on-spike-stage-by-stage) | ExecuTorch on Zephyr: golden checks per stage and a per-operator profile | yes (needs the model weights from Hugging Face) |
 | [4. Modelling Atlas inside Spike](#4-modelling-atlas-inside-spike) | a Spike plugin for Atlas's host interface and scalar core | description only |
 
 ## Setup
@@ -119,26 +119,37 @@ What it caught, all on Spike:
 input tensors, runs the method, and compares the output with a golden tensor exported from PyTorch on the host. It
 prints the largest absolute error, the relative L2 error and PASS or FAIL against a tolerance.
 
+Create the model and golden files first (exported from `lerobot/smolvla_base`, Apache-2.0):
+
 ```sh
-# inside a west workspace that has zephyr-penguin and its Zephyr tree
+cd zephyr-penguin-workloads
+# Python with torch, safetensors, pandas and the executorch package built from the executorch submodule
+huggingface-cli download lerobot/smolvla_base      # or pass --ckpt <model.safetensors>
+python executorch/smolvla/scripts/export_expert_layer.py --layer 1 --prefix-len 241 \
+       --precision lerobot_bf16 --seed 0 --out OUT/expert_l1
+```
+
+Then build and run, inside a west workspace that has zephyr-penguin and its Zephyr tree:
+
+```sh
 export EXECUTORCH_DIR=... XNNPACK_DIR=... PYTHON_EXECUTABLE=<python with flatc> FLATC_EXECUTABLE=<flatc>
-export EXEC_INPUTS=expert_l1.inputs.bin EXEC_EXPECTED=expert_l1.expected.bin EXEC_TOL=2e-3 \
+export EXEC_INPUTS=OUT/expert_l1.inputs.bin EXEC_EXPECTED=OUT/expert_l1.expected.bin EXEC_TOL=2e-3 \
        ET_METHOD_POOL_SIZE=16777216 ET_TEMP_POOL_SIZE=1048576 EXEC_EMBED=hex \
        EXTRA_CMAKE="-DXNNPACK_ENABLE_RISCV_ZVFBFA=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=67108864"
-executorch/smolvla/scripts/build.sh chipyard_penguin/penguin expert_l1.pte build/smolvla_l1
+executorch/smolvla/scripts/build.sh chipyard_penguin/penguin OUT/expert_l1.pte build/smolvla_l1
 west build -d build/smolvla_l1 -t run
 ```
 
+Expected (key lines):
+
 ```
-execute(): minstret delta = 49535259, mcycle delta = 49535259
-max|out-exp|=1.562500e-02 max|exp|=4.468750e+00 relL2=2.785857e-04 tol=2.000000e-03
+execute(): minstret delta = 49009558, ...
+... relL2=1.325722e-04 tol=2.000000e-03
 PASS
 ```
 
 About 10 minutes to build and 30 s to run. The 64 MiB `malloc` arena is required: with the app's default 1 MiB the
-model fails at load with `xnn_status_out_of_memory`. The model and golden files (`expert_l1.pte`, 12.5 MB, plus
-`.inputs.bin` and `.expected.bin`) are exported from `lerobot/smolvla_base`. **Their export scripts are not public yet**,
-so for now this section shows the method rather than a run you can reproduce.
+model fails at load with `xnn_status_out_of_memory`.
 
 How we used it:
 - **One stage at a time, then the chain.** Each stage (vision layer, language-model layer, expert layer) is exported as
