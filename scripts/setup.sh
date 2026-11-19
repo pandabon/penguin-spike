@@ -6,7 +6,8 @@
 #   scripts/setup.sh --model    also the west workspace (board repo + Zephyr) and a Python venv for section 3
 #   scripts/setup.sh --check    only report what is there
 #
-# Host needs: git, curl, tar, xz, make, a C++17 compiler (for Spike), cmake >= 3.20, ninja; python >= 3.10 for --model.
+# Host needs: git, curl, tar, xz, make, a C++17 compiler (for Spike) and python3 (>= 3.10 for --model).
+# cmake and ninja come from pip into .venv, so the host's versions do not matter.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD
@@ -22,13 +23,16 @@ have() { command -v "$1" >/dev/null 2>&1; }
 check() {
   local ok=1
   printf '%-12s %s\n' tool status
-  for t in git curl tar make cmake ninja; do
+  for t in git curl tar make g++ python3; do
     if have $t; then printf '%-12s ok\n' $t; else printf '%-12s MISSING\n' $t; ok=0; fi
+  done
+  for t in cmake ninja; do
+    if [ -x .venv/bin/$t ]; then printf '%-12s ok (.venv)\n' $t; else printf '%-12s not set up\n' $t; ok=0; fi
   done
   [ -x "$SDK/gnu/riscv64-zephyr-elf/bin/riscv64-zephyr-elf-gcc" ] && printf '%-12s ok (%s)\n' sdk "$SDK" || { printf '%-12s not set up\n' sdk; ok=0; }
   [ -x "$tools/spike/bin/spike" ] && printf '%-12s ok\n' spike || { printf '%-12s not built\n' spike; ok=0; }
   [ -d .west ] && printf '%-12s ok\n' west-ws || printf '%-12s not set up (only section 3 needs it: --model)\n' west-ws
-  [ -x .venv/bin/python ] && printf '%-12s ok\n' venv || printf '%-12s not set up (only section 3 needs it: --model)\n' venv
+  [ -x .venv/bin/west ] && printf '%-12s ok\n' model-py || printf '%-12s not set up (only section 3 needs it: --model)\n' model-py
   [ $ok = 1 ]
 }
 
@@ -37,7 +41,13 @@ if [ "$mode" = --check ]; then check; exit $?; fi
 say "submodules (only the commits we pin, shallow)"
 git submodule update --init zephyr-penguin-workloads
 git submodule update --init --depth 1 XNNPACK executorch riscv-isa-sim
-git -C executorch submodule update --init --depth 1 third-party/googletest
+# The XNNPACK test harness also builds GoogleTest and XNNPACK's helper libraries from ExecuTorch's tree.
+git -C executorch submodule update --init --depth 1 third-party/googletest \
+  backends/xnnpack/third-party/{pthreadpool,cpuinfo,FXdiv,FP16}
+
+say "Python venv (.venv) with cmake and ninja"
+[ -x .venv/bin/python ] || python3 -m venv .venv
+.venv/bin/pip install -q --upgrade pip cmake ninja
 
 say "Zephyr SDK $SDK_VER, RISC-V toolchain and host tools (dtc), into .tools/"
 if [ ! -x "$SDK/gnu/riscv64-zephyr-elf/bin/riscv64-zephyr-elf-gcc" ]; then
@@ -59,9 +69,10 @@ if [ ! -x "$tools/spike/bin/spike" ]; then
 fi
 
 if [ "$mode" = --model ]; then
-  say "Python venv (.venv): west, Zephyr's build requirements, torch and the ExecuTorch fork"
-  [ -x .venv/bin/python ] || python3 -m venv .venv
-  .venv/bin/pip install -q --upgrade pip west
+  say "Python packages for section 3: west, Zephyr's build requirements, torch and the ExecuTorch fork"
+  .venv/bin/python -c 'import sys; sys.exit(sys.version_info < (3, 10))' ||
+    { echo "section 3 needs python >= 3.10 in .venv: remove .venv and rerun with a newer python3 first on PATH"; exit 1; }
+  .venv/bin/pip install -q west
   say "west workspace: the board repo and the Zephyr fork it pins, as listed in zephyr-penguin-workloads/west.yml"
   [ -d .west ] || .venv/bin/west init -l zephyr-penguin-workloads
   .venv/bin/west update

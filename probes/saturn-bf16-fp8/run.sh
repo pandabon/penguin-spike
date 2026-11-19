@@ -31,8 +31,8 @@ for c in 1 2 3 4; do
   elf=$out/probe$c.elf
   "$CC" -march=rv64gcv -mabi=lp64d -nostdlib -T "$here/link.ld" -DCASE=$c -o "$elf" "$here/probe.S"
   set +e
-  timeout 10 "$SPIKE" --isa=$CHIP_ISA "$elf"; a=$?
-  timeout 10 "$SPIKE" --isa=$HAND_ISA "$elf"; b=$?
+  timeout 10 "$SPIKE" --isa=$CHIP_ISA "$elf" 2>/dev/null; a=$?
+  timeout 10 "$SPIKE" --isa=$HAND_ISA "$elf" 2>/dev/null; b=$?
   set -e
   printf '%-32s | %-22s | %-22s\n' "${names[$c]}" "$(verdict $a)" "$(verdict $b)"
 done

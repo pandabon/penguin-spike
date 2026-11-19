@@ -15,25 +15,31 @@ whether it ran on Spike, on RTL simulation or on the chip.
 | [3. A whole model on Spike, stage by stage](#3-a-whole-model-on-spike-stage-by-stage) | ExecuTorch on Zephyr: golden checks per stage and a per-operator profile | yes (needs the model weights from Hugging Face) |
 | [4. Modelling Atlas inside Spike](#4-modelling-atlas-inside-spike) | a Spike plugin for Atlas's host interface and scalar core | description only |
 
-## Setup
-
-The submodules are large (ExecuTorch alone pulls dozens of its own), so fetch only what a section needs:
+## Quick start
 
 ```sh
 git clone https://github.com/pandabon/penguin-spike.git && cd penguin-spike
-git submodule update --init zephyr-penguin-workloads          # sections 2 and 3
-git submodule update --init --depth 1 XNNPACK executorch      # sections 2 and 3
-git -C executorch submodule update --init third-party/googletest   # section 2
+scripts/setup.sh          # once: pinned submodules, Zephyr SDK (RISC-V), Spike; all inside this folder
+make probe                # section 1, seconds
+make xnnpack-test         # section 2, a few minutes to build, under a second to run
 ```
 
-| Submodule | Branch | What it holds |
+For section 3, run `scripts/setup.sh --model` once more (a Python venv with torch and the ExecuTorch fork, plus the
+board repo and Zephyr through west; several GB), then `make model`.
+
+`scripts/setup.sh` installs nothing outside the repo: the Zephyr SDK and Spike go to `.tools/`, Python to `.venv/`,
+the west workspace into the repo folder itself. Re-running it skips what is already there; `make check` reports the
+state. The host needs git, curl, tar with xz, make, python3 and a C++17 compiler (to build Spike); cmake and ninja come
+from pip into `.venv/`. Section 3 needs python 3.10 or newer. Linux x86-64 only for now (the SDK download is chosen for it).
+
+| Pinned piece | Commit | What it holds |
 |---|---|---|
-| `zephyr-penguin-workloads` | `main` | the bare-metal XNNPACK test harness (`executorch/xnnpack-tests`), the SmolVLA Zephyr app (`executorch/smolvla`), the ETDump reader (`executorch/tools/etdump_inspect.py`) |
+| `zephyr-penguin-workloads` | `main` | the bare-metal XNNPACK test harness (`executorch/xnnpack-tests`), the SmolVLA Zephyr app and its export scripts (`executorch/smolvla`), the ETDump reader (`executorch/tools/etdump_inspect.py`) |
 | `XNNPACK` | `penguin` | XNNPACK with Saturn RVV kernels, incl. Zvfbfa bf16 gemm and converts |
 | `executorch` | `penguin-1.6` | ExecuTorch 1.6 with the Zephyr port and per-operator profiling hooks |
-
-Common tools: `spike` (riscv-isa-sim with Zvfbfa and Zvfofp8min; we use 1.1.1-dev) and, for section 1, an LLVM 18 or
-newer `clang` + `lld` with the RISC-V target. Sections 2 and 3 list their own.
+| `riscv-isa-sim` | upstream `609dbe0b` | the Spike these results came from (1.1.1-dev, with Zvfbfa and Zvfofp8min) |
+| Zephyr SDK | 1.0.0-beta1 | GCC 14.3 + picolibc for RISC-V, and `dtc` |
+| board repo + Zephyr | as pinned in `zephyr-penguin-workloads/west.yml` | fetched by west for section 3 only |
 
 ## 1. Matching Spike to the chip
 
@@ -43,7 +49,7 @@ newer `clang` + `lld` with the RISC-V target. Sections 2 and 3 list their own.
 rv64imafdcbv_zicsr_zifencei_zihpm_zvl256b_zve64d_zvfh_zfh_zba_zbb_zbs_zvbb_zvfofp8min_zfbfmin_zvfbfmin_zvfbfa
 ```
 
-A hand-written string is easy to get subtly wrong. Saturn implements Zvfbfa (bf16 arithmetic selected by
+It is in the board repo's [devicetree](https://github.com/pandabon/zephyr-penguin/blob/e47fdceca142e3bda2b68ff5b0b35c25ceaaf1d1/dts/riscv/chipyard/penguin.dtsi). A hand-written string is easy to get subtly wrong. Saturn implements Zvfbfa (bf16 arithmetic selected by
 `vtype.altfmt`) and Zvfbfmin, but **not** Zvfbfwma: its decoder has no `vfwmaccbf16`. A string that adds `zvfbfwma`
 lets Spike run code that traps on the chip. The probe below shows it.
 
@@ -51,7 +57,7 @@ lets Spike run code that traps on the chip. The probe below shows it.
 runs each under the chip string and under a hand-written string with `zvfbfwma`:
 
 ```sh
-CLANG=/path/to/clang SPIKE=/path/to/spike probes/saturn-bf16-fp8/run.sh
+make probe        # or: CC=<riscv gcc> SPIKE=<spike> probes/saturn-bf16-fp8/run.sh
 ```
 
 | Probe | Spike, chip ISA | Spike, + zvfbfwma | Saturn (from its RTL) |
@@ -67,7 +73,8 @@ benchmarks show the same split (the ones using fp8 `vfwmacc` trap on Spike, the 
 
 **Give Spike the on-chip memories.** The board port derives the ISA string from Kconfig and passes `-m` regions taken
 from the devicetree: DRAM at 0x8000_0000, the 64 KiB scratchpad at 0x0800_0000, and Atlas's VMEM at 0x2000_0000 when an
-app enables it. See `zephyr-penguin/cmake/spike.cmake` and `zephyr-penguin/boards/chipyard/penguin/board.cmake`. For a
+app enables it. See the board repo's [`cmake/spike.cmake`](https://github.com/pandabon/zephyr-penguin/blob/e47fdceca142e3bda2b68ff5b0b35c25ceaaf1d1/cmake/spike.cmake), [`boards/chipyard/penguin/board.cmake`](https://github.com/pandabon/zephyr-penguin/blob/e47fdceca142e3bda2b68ff5b0b35c25ceaaf1d1/boards/chipyard/penguin/board.cmake)
+and the memory nodes in [`dts/riscv/chipyard/penguin.dtsi`](https://github.com/pandabon/zephyr-penguin/blob/e47fdceca142e3bda2b68ff5b0b35c25ceaaf1d1/dts/riscv/chipyard/penguin.dtsi). For a
 bare-metal ELF, the same layout is:
 
 ```sh
@@ -90,10 +97,10 @@ How the harness works:
 - `run.sh` takes Spike's `--isa` from `baremetal/penguin-isa.cmake`, so the tests see the same ISA as a board build.
 
 ```sh
-cd zephyr-penguin-workloads
-export XNNPACK_DIR=$PWD/../XNNPACK EXECUTORCH_DIR=$PWD/../executorch
-executorch/xnnpack-tests/scripts/build.sh --out build/xt f32-bf16-vcvt
-executorch/xnnpack-tests/scripts/run.sh build/xt
+make xnnpack-test                 # SUITE=f32-bf16-vcvt by default; any XNNPACK test name works
+# what it runs:
+#   executorch/xnnpack-tests/scripts/build.sh --out build/xt f32-bf16-vcvt
+#   executorch/xnnpack-tests/scripts/run.sh build/xt
 ```
 
 ```
@@ -119,7 +126,8 @@ What it caught, all on Spike:
 input tensors, runs the method, and compares the output with a golden tensor exported from PyTorch on the host. It
 prints the largest absolute error, the relative L2 error and PASS or FAIL against a tolerance.
 
-Create the model and golden files first (exported from `lerobot/smolvla_base`, Apache-2.0):
+After `scripts/setup.sh --model`, `make model` exports the files and runs the app. By hand, export the model and golden
+files first (from `lerobot/smolvla_base`, Apache-2.0; the weights download from Hugging Face on first use):
 
 ```sh
 cd zephyr-penguin-workloads
@@ -129,7 +137,7 @@ python executorch/smolvla/scripts/export_expert_layer.py --layer 1 --prefix-len 
        --precision lerobot_bf16 --seed 0 --out OUT/expert_l1
 ```
 
-Then build and run, inside a west workspace that has zephyr-penguin and its Zephyr tree:
+Then build and run (inside the west workspace that `setup.sh --model` makes):
 
 ```sh
 export EXECUTORCH_DIR=... XNNPACK_DIR=... PYTHON_EXECUTABLE=<python with flatc> FLATC_EXECUTABLE=<flatc>
