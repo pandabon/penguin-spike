@@ -1,0 +1,14 @@
+[submodule "zephyr-penguin-workloads"]
+	path = zephyr-penguin-workloads
+	url = https://github.com/pandabon/zephyr-penguin-workloads.git
+	branch = main
+[submodule "XNNPACK"]
+	path = XNNPACK
+	url = https://github.com/pandabon/XNNPACK.git
+	branch = penguin
+	shallow = true
+[submodule "executorch"]
+	path = executorch
+	url = https://github.com/pandabon/executorch.git
+	branch = penguin-1.6
+	shallow = true
